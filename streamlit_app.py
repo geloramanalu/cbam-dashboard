@@ -1,151 +1,110 @@
 import streamlit as st
+import numpy as np
 import pandas as pd
-import math
-from pathlib import Path
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# Title and introduction
+st.title("CBAM Impact Analysis Visualizations")
+st.write("This dashboard dynamically demonstrates the key models and formulas with enhanced graphs and wider parameter ranges.")
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# Sidebar for input parameters
+st.sidebar.title("Input Parameters")
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# Default values
+default_emissions = 50.0
+default_output = 100.0
+default_delta_y = 20.0
+identity_matrix = 1.0
+mrio_coeff = 0.8  # Fixed dummy value
+default_wage_vector = 2.0  # Fixed dummy value
+default_employment_vector = 3.0  # Fixed dummy value
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
+# Adjustable inputs using sliders (with wider ranges)
+emissions = st.sidebar.slider("Total Emissions", min_value=0.0, max_value=500.0, value=default_emissions, step=5.0)
+output = st.sidebar.slider("Total Output", min_value=0.0, max_value=500.0, value=default_output, step=5.0)
+delta_y = st.sidebar.slider("Direct Impact (deltaY)", min_value=0.0, max_value=500.0, value=default_delta_y, step=5.0)
+
+# Fixed values
+i = identity_matrix  # Identity matrix (fixed)
+a = mrio_coeff  # MRIO Technical Coefficient (dummy fixed)
+
+# Emission intensity formula
+if output != 0:
+    emission_intensity = emissions / output
+else:
+    emission_intensity = 0
+
+# Total output change (deltaX)
+try:
+    delta_x = (i - a) ** -1 * delta_y
+except ZeroDivisionError:
+    delta_x = 0
+
+# Wage and employment impact formulas
+delta_w = default_wage_vector * delta_x
+delta_n = default_employment_vector * delta_x
+
+# Dynamic visualization functions
+def update_emission_intensity_chart(output, emissions):
+    emission_data = pd.DataFrame({
+        'Output': np.linspace(0, max(output, 1), 100),
+        'Emission Intensity': np.linspace(0, 500, 100) * (emissions / max(output, 1))
+    })
+    st.line_chart(emission_data.set_index('Output'), use_container_width=True)
+
+def update_output_change_chart(delta_y, a):
+    output_change_data = pd.DataFrame({
+        'deltaY': np.linspace(0, max(delta_y, 1), 100),
+        'deltaX': (i - a) ** -1 * np.linspace(0, max(delta_y, 1), 100)
+    })
+    st.line_chart(output_change_data.set_index('deltaY'), use_container_width=True)
+
+def update_wage_employment_chart(delta_x, wage_vector, employment_vector):
+    wage_employment_data = pd.DataFrame({
+        'deltaX': np.linspace(0, max(delta_x, 1), 100),
+        'Wage Impact': wage_vector * np.linspace(0, max(delta_x, 1), 100),
+        'Employment Impact': employment_vector * np.linspace(0, max(delta_x, 1), 100)
+    })
+    st.line_chart(wage_employment_data.set_index('deltaX'), use_container_width=True)
+
+# Visualization sections
+st.subheader("Emission Intensity by Product")
+st.write("The formula used:")
+st.latex(r"e_{i,k} = \frac{\Sigma_j \text{emissions}_{j,k}}{\Sigma_j \text{output}_{j,k}}")
+st.write(f"Emission Intensity: {emission_intensity:.2f}")
+update_emission_intensity_chart(output, emissions)
+
+# Layout for side-by-side graphs
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("Total Output Change (deltaX)")
+    st.write("The formula used:")
+    st.latex(r"\Delta \mathbf{X} = (\mathbf{I} - \mathbf{A})^{-1} \Delta \mathbf{Y}")
+    st.write(f"Total Output Change (deltaX): {delta_x:.2f}")
+    update_output_change_chart(delta_y, a)
+
+with col2:
+    st.subheader("Wage and Employment Impacts")
+    st.write("The formulas used:")
+    st.latex(r"\Delta \mathbf{W} = \mathbf{w} \odot \Delta \mathbf{X}")
+    st.latex(r"\Delta \mathbf{N} = \mathbf{n} \odot \Delta \mathbf{X}")
+    st.write(f"Wage Impact (deltaW): {delta_w:.2f}")
+    st.write(f"Employment Impact (deltaN): {delta_n:.2f}")
+    update_wage_employment_chart(delta_x, default_wage_vector, default_employment_vector)
+
+# Trigger updates based on slider changes
+if st.session_state.get('key') != (output, emissions, delta_y):
+    st.session_state['key'] = (output, emissions, delta_y)
+    update_emission_intensity_chart(output, emissions)
+    update_output_change_chart(delta_y, a)
+    update_wage_employment_chart(delta_x, default_wage_vector, default_employment_vector)
+
+st.markdown(
     """
-
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
-
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
-
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
+    <br><br>
+    <div style="text-align: center; color: gray; font-size: 12px;">
+        &copy; Gelora Damayanti Manalu 2024.
+    </div>
+    """, 
+    unsafe_allow_html=True
 )
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
