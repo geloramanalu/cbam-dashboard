@@ -1,6 +1,6 @@
-# :earth_americas: GDP dashboard template
+# :earth_americas: CBAM dashboard
 
-A simple Streamlit app showing the GDP of different countries in the world.
+This dashboard dynamically demonstrates the key models and formulas with enhanced graphs and wider parameter ranges.
 
 [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://gdp-dashboard-template.streamlit.app/)
 
